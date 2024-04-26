@@ -20,6 +20,7 @@ rpc_tests = []
 test_utils = []
 
 [dependencies]
+anchor-client = "0.27.0"
 anchor-lang = "0.27.0"
 bytemuck = "1.13.0"
 base64 = "0.13"
@@ -39,6 +40,9 @@ solana-client = "1.14"
 solana-sdk = "1.14"
 solana-transaction-status = "1.14"
 thiserror = "1.0.38"
+token-faucet = { git = "https://github.com/drift-labs/protocol-v2.git", tag = "v2.67.0", features = [
+    "no-entrypoint",
+] }
 tokio = { version = "1.34.0", features = ["full"] }
 tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
 regex = "1.10.2"
@@ -54,7 +58,6 @@ hex = "*"
 hex-literal = "*"
 serde_json = "*"
 spl-associated-token-account = "1.1.2"
-anchor-client = "0.27.0"
 anchor-lang = "*"
 bytes = "*"
 futures = "0.3.30"

@@ -52,6 +52,7 @@ use tokio::{
     },
 };
 use user::DriftUser;
+use user_name::DEFAULT_USER_NAME;
 use utils::get_ws_url;
 use websocket_account_subscriber::{AccountUpdate, WebsocketAccountSubscriber};
 
@@ -90,6 +91,8 @@ pub mod marketmap;
 pub mod oraclemap;
 pub mod slot_subscriber;
 pub mod usermap;
+pub mod user_name;
+pub mod token_faucet;
 
 // wrappers
 pub mod user;
@@ -1136,6 +1139,15 @@ impl<'a> TransactionBuilder<'a> {
         }
 
         self
+    }
+
+    /// https://github.com/drift-labs/protocol-v2/blob/6450ed0daf0540564ebe2c477ea9a6d28049fd63/sdk/src/driftClient.ts#L2138
+    pub async fn initialize_user_account_for_devnet(&self, market_index: u16, t) -> Vec<()> {
+        let sub_account_id = 0;
+        let name = DEFAULT_USER_NAME;
+        let ixs = Vec::new();
+
+        Vec::new()
     }
 
     /// Deposit collateral into account

@@ -8,20 +8,20 @@ use token_faucet::{program::TokenFaucet as TokenFaucetProgram, ID as TOKEN_FAUCE
 
 use crate::{RpcAccountProvider, Wallet};
 
-pub struct TokenFaucet<C> {
+pub struct TokenFaucet<'a> {
     // connection:Connection
     wallet: Wallet,
-    program: Program<C>,
+    program: Program<&'a TokenFaucetProgram>,
     provider: RpcAccountProvider,
     mint: Pubkey,
     // opts: Option<ConfirmOptions>
 }
 
-impl<C: Clone + Deref<Target = impl Signer>> TokenFaucet<C> {
+impl<'a> TokenFaucet<'a> {
     pub fn new(wallet: Wallet, mint: Pubkey) -> Self {
         let provider = RpcAccountProvider::new("");
-        let client = Client::new(Cluster::Devnet, &wallet.signer.into());
-        let program: Program<TokenFaucetProgram> = client.program(TOKEN_FAUCET_PROGRAM_ID);
+        let client = Client::new(Cluster::Devnet, &wallet.signer).into();
+        // let program  = client.program(TOKEN_FAUCET_PROGRAM_ID);
 
         Self {
             wallet,

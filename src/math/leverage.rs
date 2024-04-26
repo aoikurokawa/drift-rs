@@ -94,6 +94,7 @@ fn calculate_leverage(total_liability_value: u128, net_asset_value: i128) -> u12
 }
 
 #[cfg(test)]
+#[cfg(feature = "rpc_tests")]
 mod tests {
     use super::*;
     use crate::{Context, RpcAccountProvider, Wallet};
