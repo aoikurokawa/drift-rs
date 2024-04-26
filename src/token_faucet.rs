@@ -1,27 +1,29 @@
-use std::ops::Deref;
+use std::{ops::Deref, sync::Arc};
 
 use anchor_client::{Client, Cluster, Program};
 use solana_sdk::{
-    instruction::Instruction, pubkey::Pubkey, signer::Signer, transaction::Transaction,
+    instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use token_faucet::{program::TokenFaucet as TokenFaucetProgram, ID as TOKEN_FAUCET_PROGRAM_ID};
 
 use crate::{RpcAccountProvider, Wallet};
 
-pub struct TokenFaucet<'a> {
+pub struct TokenFaucet {
     // connection:Connection
     wallet: Wallet,
-    program: Program<&'a TokenFaucetProgram>,
+    program: Program<Arc<Keypair>>,
     provider: RpcAccountProvider,
     mint: Pubkey,
     // opts: Option<ConfirmOptions>
 }
 
-impl<'a> TokenFaucet<'a> {
+impl TokenFaucet {
     pub fn new(wallet: Wallet, mint: Pubkey) -> Self {
         let provider = RpcAccountProvider::new("");
-        let client = Client::new(Cluster::Devnet, &wallet.signer).into();
-        // let program  = client.program(TOKEN_FAUCET_PROGRAM_ID);
+        let signer = wallet.signer;
+        let client = Client::new(Cluster::Devnet, signer);
+        let program = client.program(TOKEN_FAUCET_PROGRAM_ID);
 
         Self {
             wallet,

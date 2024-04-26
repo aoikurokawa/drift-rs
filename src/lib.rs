@@ -1142,7 +1142,7 @@ impl<'a> TransactionBuilder<'a> {
     }
 
     /// https://github.com/drift-labs/protocol-v2/blob/6450ed0daf0540564ebe2c477ea9a6d28049fd63/sdk/src/driftClient.ts#L2138
-    pub async fn initialize_user_account_for_devnet(&self, market_index: u16, t) -> Vec<()> {
+    pub async fn initialize_user_account_for_devnet(&self, market_index: u16,) -> Vec<()> {
         let sub_account_id = 0;
         let name = DEFAULT_USER_NAME;
         let ixs = Vec::new();
