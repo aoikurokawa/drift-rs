@@ -5,7 +5,10 @@ use solana_sdk::{
     instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use token_faucet::{program::TokenFaucet as TokenFaucetProgram, ID as TOKEN_FAUCET_PROGRAM_ID};
+use token_faucet::{
+    accounts::InitializeFaucet, program::TokenFaucet as TokenFaucetProgram,
+    ID as TOKEN_FAUCET_PROGRAM_ID,
+};
 
 use crate::{RpcAccountProvider, Wallet};
 
@@ -52,10 +55,17 @@ impl TokenFaucet {
         self.get_faucet_config_public_key_and_nonce().0
     }
 
-    // pub async fn initialize(&self) -> Transaction {
-    //     let pubkey = self.get_faucet_config_public_key();
-    //     self.
-    // }
+    pub async fn initialize(&self) {
+        let pubkey = self.get_faucet_config_public_key();
+        self.program.request().accounts(InitializeFaucet {
+            faucet_config: pubkey,
+            admin: self.wallet.signer(),
+            mint_account: self.mint,
+            rent: SysvarId,
+            systemProgram: anchor_client.web3.SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
+        });
+    }
 
     // pub async fn create_associated_token_account_and_mint_to_instructions(
     // ) -> (Pubkey, Instruction, Instruction) {
