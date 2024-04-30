@@ -2,7 +2,12 @@ use std::{ops::Deref, sync::Arc};
 
 use anchor_client::{Client, Cluster, Program};
 use solana_sdk::{
-    instruction::Instruction, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    instruction::Instruction,
+    pubkey::Pubkey,
+    rent::Rent,
+    signature::{Keypair, Signature},
+    signer::Signer,
+    system_program, sysvar,
     transaction::Transaction,
 };
 use token_faucet::{
@@ -10,7 +15,10 @@ use token_faucet::{
     ID as TOKEN_FAUCET_PROGRAM_ID,
 };
 
-use crate::{RpcAccountProvider, Wallet};
+use crate::{
+    types::{SdkError, SdkResult},
+    RpcAccountProvider, Wallet,
+};
 
 pub struct TokenFaucet {
     // connection:Connection
@@ -55,16 +63,22 @@ impl TokenFaucet {
         self.get_faucet_config_public_key_and_nonce().0
     }
 
-    pub async fn initialize(&self) {
+    pub async fn initialize(&self) -> SdkResult<Signature> {
         let pubkey = self.get_faucet_config_public_key();
-        self.program.request().accounts(InitializeFaucet {
-            faucet_config: pubkey,
-            admin: self.wallet.signer(),
-            mint_account: self.mint,
-            rent: SysvarId,
-            systemProgram: anchor_client.web3.SystemProgram.programId,
-            tokenProgram: TOKEN_PROGRAM_ID,
-        });
+        let my_account_kp = Keypair::new();
+        self.program
+            .request()
+            .accounts(InitializeFaucet {
+                faucet_config: pubkey,
+                admin: self.wallet.signer(),
+                mint_account: self.mint,
+                rent: sysvar::rent::id(),
+                system_program: system_program::id(),
+                token_program: anchor_spl::token::ID,
+            })
+            .signer(&my_account_kp)
+            .send()
+            .map_err(|e| SdkError::AnchorClient(e))
     }
 
     // pub async fn create_associated_token_account_and_mint_to_instructions(

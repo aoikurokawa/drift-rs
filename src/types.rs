@@ -212,6 +212,8 @@ pub enum SdkError {
     Ws(#[from] solana_client::nonblocking::pubsub_client::PubsubClientError),
     #[error("{0}")]
     Anchor(#[from] Box<anchor_lang::error::Error>),
+    #[error("{0}")]
+    AnchorClient(#[from] anchor_client::ClientError),
     #[error("error while deserializing")]
     Deserializing,
     #[error("invalid drift account")]
