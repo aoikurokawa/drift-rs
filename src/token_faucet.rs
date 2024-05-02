@@ -1,18 +1,17 @@
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use anchor_client::{Client, Cluster, Program};
+use anchor_spl::associated_token::get_associated_token_address;
 use solana_sdk::{
     instruction::Instruction,
     pubkey::Pubkey,
-    rent::Rent,
     signature::{Keypair, Signature},
-    signer::Signer,
     system_program, sysvar,
-    transaction::Transaction,
 };
+use spl_associated_token_account::instruction::create_associated_token_account;
 use token_faucet::{
-    accounts::InitializeFaucet, program::TokenFaucet as TokenFaucetProgram,
-    ID as TOKEN_FAUCET_PROGRAM_ID,
+    accounts::{self, InitializeFaucet},
+    instruction, FaucetConfig, ID as TOKEN_FAUCET_PROGRAM_ID,
 };
 
 use crate::{
@@ -81,7 +80,79 @@ impl TokenFaucet {
             .map_err(|e| SdkError::AnchorClient(e))
     }
 
-    // pub async fn create_associated_token_account_and_mint_to_instructions(
-    // ) -> (Pubkey, Instruction, Instruction) {
-    // }
+    pub fn fetch_state(&self) -> SdkResult<FaucetConfig> {
+        self.program
+            .account(self.get_faucet_config_public_key())
+            .map_err(|e| SdkError::AnchorClient(e))
+    }
+
+    fn mint_to_user_ix(
+        &self,
+        user_token_account: &Pubkey,
+        amount: u64,
+    ) -> SdkResult<Vec<Instruction>> {
+        let signer = self.wallet.signer;
+        let signer = Keypair::from_bytes(&signer.to_bytes()).unwrap();
+        self.program
+            .request()
+            .accounts(accounts::MintToUser {
+                faucet_config: self.get_faucet_config_public_key(),
+                mint_account: self.mint,
+                user_token_account: *user_token_account,
+                mint_authority: self.get_mint_authority(),
+                token_program: anchor_spl::token::ID,
+            })
+            .args(instruction::MintToUser { amount })
+            .signer(&signer)
+            .instructions()
+            .map_err(|e| SdkError::AnchorClient(e))
+    }
+
+    pub async fn mint_to_user(
+        &self,
+        user_token_account: &Pubkey,
+        amount: u64,
+    ) -> SdkResult<Signature> {
+        let signer = self.wallet.signer.clone();
+        let signer = Keypair::from_bytes(&signer.to_bytes()).unwrap();
+        let mint_ix = self.mint_to_user_ix(user_token_account, amount)?;
+        match mint_ix.get(0) {
+            Some(ix) => self
+                .program
+                .request()
+                .instruction(ix.clone())
+                .signer(&signer)
+                .send()
+                .map_err(|e| SdkError::AnchorClient(e)),
+            None => Err(SdkError::Generic("".to_string())),
+        }
+    }
+
+    pub async fn create_associated_token_account_and_mint_to_instructions(
+        &self,
+        user_pubkey: Pubkey,
+        amount: u64,
+    ) -> SdkResult<(Pubkey, Instruction, Instruction)> {
+        let state = self.fetch_state()?;
+        let associated_token_pubkey = self.get_assosciated_mock_usd_mint_address(user_pubkey)?;
+        let associated_token_account_ix = create_associated_token_account(
+            &self.wallet.signer(),
+            &associated_token_pubkey,
+            &user_pubkey,
+            &state.mint,
+        );
+        let mint_to_ix = self.mint_to_user_ix(&associated_token_pubkey, amount)?;
+
+        Ok((
+            associated_token_pubkey,
+            associated_token_account_ix,
+            mint_to_ix[0].clone(),
+        ))
+    }
+
+    pub fn get_assosciated_mock_usd_mint_address(&self, user_pubkey: Pubkey) -> SdkResult<Pubkey> {
+        let state = self.fetch_state()?;
+
+        Ok(get_associated_token_address(&state.mint, &user_pubkey))
+    }
 }

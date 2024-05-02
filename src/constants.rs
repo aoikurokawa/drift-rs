@@ -73,6 +73,25 @@ pub fn derive_drift_signer() -> Pubkey {
     account
 }
 
+pub fn get_user_account_public_key_and_nonce(
+    authority: Pubkey,
+    sub_account_id: u8,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            &b"user"[..],
+            &authority.to_bytes(),
+            &sub_account_id.to_le_bytes(),
+        ],
+        &PROGRAM_ID,
+    )
+}
+
+pub fn get_user_account_publickey(authority: Pubkey, sub_account_id: u8) -> Pubkey {
+    let program_id = PROGRAM_ID;
+    get_user_account_public_key_and_nonce(authority, sub_account_id).0
+}
+
 /// Helper methods for market data structs
 pub trait MarketExt {
     fn market_type(&self) -> &'static str;
