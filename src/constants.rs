@@ -75,7 +75,7 @@ pub fn derive_drift_signer() -> Pubkey {
 
 pub fn get_user_account_public_key_and_nonce(
     authority: Pubkey,
-    sub_account_id: u8,
+    sub_account_id: u16,
 ) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[
@@ -87,7 +87,11 @@ pub fn get_user_account_public_key_and_nonce(
     )
 }
 
-pub fn get_user_account_publickey(authority: Pubkey, sub_account_id: u8) -> Pubkey {
+pub fn get_user_stats_account_public_key(authority: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[&b"user_stats"[..], &authority.to_bytes()], &PROGRAM_ID).0
+}
+
+pub fn get_user_account_publickey(authority: Pubkey, sub_account_id: u16) -> Pubkey {
     let program_id = PROGRAM_ID;
     get_user_account_public_key_and_nonce(authority, sub_account_id).0
 }

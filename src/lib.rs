@@ -41,6 +41,8 @@ use solana_sdk::{
     message::{v0, Message, VersionedMessage},
     signature::{keypair_from_seed, Keypair, Signature},
     signer::Signer,
+    system_program,
+    sysvar::rent::ID as SYSVAR_RENT_ID,
     transaction::VersionedTransaction,
 };
 pub use solana_sdk::{address_lookup_table_account::AddressLookupTableAccount, pubkey::Pubkey};
@@ -59,8 +61,12 @@ use websocket_account_subscriber::{AccountUpdate, WebsocketAccountSubscriber};
 
 use crate::{
     constants::{
-        derive_spot_market_account, get_user_account_publickey, market_lookup_table, state_account, MarketExt, ProgramData
-    }, token_faucet::TokenFaucet, user_name::encode_name, utils::decode
+        derive_spot_market_account, get_user_account_publickey, market_lookup_table, state_account,
+        MarketExt, ProgramData,
+    },
+    token_faucet::TokenFaucet,
+    user_name::encode_name,
+    utils::decode,
 };
 
 // utils
@@ -90,9 +96,9 @@ pub mod jit_client;
 pub mod marketmap;
 pub mod oraclemap;
 pub mod slot_subscriber;
-pub mod usermap;
-pub mod user_name;
 pub mod token_faucet;
+pub mod user_name;
+pub mod usermap;
 
 // wrappers
 pub mod user;
@@ -689,76 +695,159 @@ impl<T: AccountProvider> DriftClient<T> {
             .get_oracle_price_data_and_slot_for_spot_market(market_index)
     }
 
-    pub async fn get_initialize_user_instructions(&self, name: Option<&str>, referrer_info: Option<ReferrerInfo>) {
-        let sub_account_id = 0;
+    pub async fn get_initialize_user_instructions(
+        &self,
+        name: Option<&str>,
+        referrer_info: Option<ReferrerInfo>,
+    ) -> SdkResult<(Pubkey, Instruction)> {
+        let sub_account_id: u16 = 0;
 
-		let user_account_publickey = get_user_account_publickey(
-			self.wallet.authority,
-            sub_account_id
-		);
+        let user_account_publickey =
+            get_user_account_publickey(self.wallet.authority, sub_account_id);
 
-		let remaining_accounts: Vec<AccountMeta> = Vec::new();
-		if let Some(referrer_info) = referrer_info {
-			remaining_accounts.push(AccountMeta {
-				pubkey: referrer_info.referrer(),
-				is_signer: false,
-				is_writable: true,
-			});
-			remaining_accounts.push(AccountMeta {
-				pubkey: referrer_info.referrer_stats(),
-				is_writable: true,
-				is_signer: false,
-			});
-        } 
-		
+        let mut remaining_accounts: Vec<AccountMeta> = Vec::new();
+        if let Some(referrer_info) = referrer_info {
+            remaining_accounts.push(AccountMeta {
+                pubkey: referrer_info.referrer(),
+                is_signer: false,
+                is_writable: true,
+            });
+            remaining_accounts.push(AccountMeta {
+                pubkey: referrer_info.referrer_stats(),
+                is_writable: true,
+                is_signer: false,
+            });
+        }
 
-        let mut state_data = self.backend.account_provider
+        let state_data = self
+            .backend
+            .account_provider
             .get_account(*state_account())
             .await
             .expect("state account");
-    let state = State::try_deserialize(&mut state_data.data.as_slice()).expect("state deserializes");
-		if !state.whitelist_mint.eq(&Pubkey::default()) {
-			let associated_token_publickey = get_associated_token_address(
-				&state.whitelist_mint,
-				&self.wallet.authority
-			);
-			remaining_accounts.push(AccountMeta {
-				pubkey: associated_token_publickey,
-				is_writable: false,
-				is_signer: false,
-			});
-		}
+        let state =
+            State::try_deserialize(&mut state_data.data.as_slice()).expect("state deserializes");
+        if !state.whitelist_mint.eq(&Pubkey::default()) {
+            let associated_token_publickey =
+                get_associated_token_address(&state.whitelist_mint, &self.wallet.authority);
+            remaining_accounts.push(AccountMeta {
+                pubkey: associated_token_publickey,
+                is_writable: false,
+                is_signer: false,
+            });
+        }
 
         let mut user_name = String::new();
-		let name = if let Some(name) = name {
+        let name = if let Some(name) = name {
             name
         } else {
-			if sub_account_id == 0 {
-				DEFAULT_USER_NAME
-			} else {
-				let user_name = format!("Subaccount {}", sub_account_id + 1);
+            if sub_account_id == 0 {
+                DEFAULT_USER_NAME
+            } else {
+                user_name = format!("Subaccount {}", sub_account_id + 1);
                 user_name.as_str()
-			}
-		};
+            }
+        };
 
-		let name_buffer = encode_name(name);
-		let initialize_user_account_ix =
-			await this.program.instruction.initializeUser(subAccountId, nameBuffer, {
-				accounts: {
-					user: userAccountPublicKey,
-					userStats: this.getUserStatsAccountPublicKey(),
-					authority: this.wallet.publicKey,
-					payer: this.wallet.publicKey,
-					rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-					systemProgram: anchor.web3.SystemProgram.programId,
-					state: await this.getStatePublicKey(),
-				},
-				remainingAccounts,
-			});
+        let name_buffer = encode_name(name)?;
+        // let initialize_user_account_ix = 
+        //     TransactionBuilder::new(
+        //     self.program_data(),
+        //     *account,
+        //     Cow::Owned(account_data),
+        //     false,
+        // );
+        // let user_stats = self.get_user_stats(&self.wallet.authority).await?;
+        let accounts = drift::accounts::InitializeUser {
+            user: user_account_publickey,
+            user_stats: constants::get_user_stats_account_public_key(self.wallet.authority),
+            authority: self.wallet.authority,
+            payer: self.wallet.authority,
+            rent: SYSVAR_RENT_ID,
+            system_program: system_program::ID,
+            state: *state_account(),
+        };
+        let initialize_user_account_ix = Instruction {
+            program_id: constants::PROGRAM_ID,
+            accounts: accounts.to_account_metas(None),
+            data: InstructionData::data(&drift::instruction::InitializeUser {
+                sub_account_id,
+                name: name_buffer,
+            }),
+        };
 
-		return [userAccountPublicKey, initializeUserAccountIx];
+
+        Ok((user_account_publickey, initialize_user_account_ix))
     }
+    
+    /// https://github.com/drift-labs/protocol-v2/blob/6450ed0daf0540564ebe2c477ea9a6d28049fd63/sdk/src/driftClient.ts#L2138
+    pub async fn initialize_user_account_for_devnet(&self, market_index: u16, token_faucet: TokenFaucet, amount: u64) -> SdkResult<Self> {
+        let sub_account_id = 0;
+        let name = DEFAULT_USER_NAME;
 
+     let tx = self
+         .init_tx(&self.wallet.sub_account(3), false)
+            .await;
+        let mut ixs = Vec::new();
+
+		let (associate_token_public_key, create_associated_account_ix, mint_to_ix) =
+			token_faucet.create_associated_token_account_and_mint_to_instructions(self.wallet.authority, amount).await?;
+
+		let (user_account_public_key, initialize_user_account_ix) =
+			self.get_initialize_user_instructions(
+				Some(name),
+				None
+			).await?;
+
+        let account_data = self
+            .get_user(self.active_sub_account_id)
+            .expect("user")
+            .get_user_account();
+let deposit_ix = TransactionBuilder::new(
+            self.program_data(),
+            *account,
+            Cow::Owned(account_data),
+            false,
+        ).deposit(amount, market_index, user_account_public_key, None);
+		// let deposit_collateral_ix = .getDepositInstruction(
+		// 	amount,
+		// 	marketIndex,
+		// 	associateTokenPublicKey,
+		// 	subAccountId,
+		// 	false,
+		// 	false
+		// );
+
+		ixs.push(createAssociatedAccountIx, mintToIx);
+
+		if sub_account_id ==0 {
+			if (
+				!(await this.checkIfAccountExists(this.getUserStatsAccountPublicKey()))
+			) {export function getUserStatsAccountPublicKey(
+	programId: PublicKey,
+	authority: PublicKey
+): PublicKey {
+	return PublicKey.findProgramAddressSync(
+		[
+			Buffer.from(anchor.utils.bytes.utf8.encode('user_stats')),
+			authority.toBuffer(),
+		],
+		programId
+	)[0];
+}
+				ixs.push(await this.getInitializeUserStatsIx());
+			}
+		}
+		ixs.push(initializeUserAccountIx, depositCollateralIx);
+
+		const tx = await this.buildTransaction(ixs, txParams);
+
+		const { txSig } = await this.sendTransaction(tx, [], this.opts);
+
+		await this.addUser(subAccountId);
+
+		return [txSig, userAccountPublicKey];
+    }
 }
 
 /// Provides the heavy-lifting and network facing features of the SDK
@@ -1113,7 +1202,6 @@ impl<T: AccountProvider> DriftClientBackend<T> {
         .unwrap();
         Ok(price_data.price)
     }
-
 }
 
 /// Composable Tx builder for Drift program
@@ -1291,51 +1379,36 @@ impl<'a> TransactionBuilder<'a> {
         self
     }
 
-    /// https://github.com/drift-labs/protocol-v2/blob/6450ed0daf0540564ebe2c477ea9a6d28049fd63/sdk/src/driftClient.ts#L2138
-    pub async fn initialize_user_account_for_devnet(&self, market_index: u16, token_faucet: TokenFaucet, amount: u64) -> SdkResult<Self> {
-        let sub_account_id = 0;
-        let name = DEFAULT_USER_NAME;
-        let mut ixs = Vec::new();
+    async fn initialize_user(
+        mut self,
+        user_account_publickey: Pubkey,
+        user_stats: Pubkey,
+        authority: Pubkey,
+        payer: Pubkey,
+        sub_account_id: u16,
+        name: [u8; 32],
+    ) -> Self {
+        let accounts = drift::accounts::InitializeUser {
+            user: user_account_publickey,
+            user_stats,
+            authority,
+            payer,
+            rent: SYSVAR_RENT_ID,
+            system_program: system_program::ID,
+            state: *state_account(),
+        };
+        let ix = Instruction {
+            program_id: constants::PROGRAM_ID,
+            accounts: accounts.to_account_metas(None),
+            data: InstructionData::data(&drift::instruction::InitializeUser {
+                sub_account_id,
+                name,
+            }),
+        };
 
-		let (associateTokenPublicKey, createAssociatedAccountIx, mintToIx) =
-			token_faucet.create_associated_token_account_and_mint_to_instructions(self.authority, amount)?;
+        self.ixs.push(ix);
 
-		let (userAccountPublicKey, initializeUserAccountIx) =
-			self.getInitializeUserInstructions(
-				subAccountId,
-				name,
-				referrerInfo
-			);
-
-		let depositCollateralIx = await this.getDepositInstruction(
-			amount,
-			marketIndex,
-			associateTokenPublicKey,
-			subAccountId,
-			false,
-			false
-		);
-
-		ixs.push(createAssociatedAccountIx, mintToIx);
-
-		if (subAccountId === 0) {
-			if (
-				!(await this.checkIfAccountExists(this.getUserStatsAccountPublicKey()))
-			) {
-				ixs.push(await this.getInitializeUserStatsIx());
-			}
-		}
-		ixs.push(initializeUserAccountIx, depositCollateralIx);
-
-		const tx = await this.buildTransaction(ixs, txParams);
-
-		const { txSig } = await this.sendTransaction(tx, [], this.opts);
-
-		await this.addUser(subAccountId);
-
-		return [txSig, userAccountPublicKey]; Create
-
-        Vec::new()
+        self
     }
 
     /// Place new orders for account
