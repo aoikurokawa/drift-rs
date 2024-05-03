@@ -41,6 +41,7 @@ use solana_sdk::{
     message::{v0, Message, VersionedMessage},
     signature::{keypair_from_seed, Keypair, Signature},
     signer::Signer,
+    signers::Signers,
     system_program,
     sysvar::rent::ID as SYSVAR_RENT_ID,
     transaction::VersionedTransaction,
@@ -539,9 +540,9 @@ impl<T: AccountProvider> DriftClient<T> {
     /// Sign and send a tx to the network
     ///
     /// Returns the signature on success
-    pub async fn sign_and_send(&self, tx: VersionedMessage) -> SdkResult<Signature> {
+    pub async fn sign_and_send_with_wallet(&self, tx: VersionedMessage) -> SdkResult<Signature> {
         self.backend
-            .sign_and_send(self.wallet(), tx)
+            .sign_and_send_with_wallet(self.wallet(), tx)
             .await
             .map_err(|err| err.to_out_of_sol_error().unwrap_or(err))
     }
@@ -556,6 +557,20 @@ impl<T: AccountProvider> DriftClient<T> {
     ) -> SdkResult<Signature> {
         self.backend
             .sign_and_send_with_config(self.wallet(), tx, config)
+            .await
+            .map_err(|err| err.to_out_of_sol_error().unwrap_or(err))
+    }
+
+    /// Sign and send a tx to the network
+    ///
+    /// Returns the signature on success
+    pub async fn sign_and_send_with_signers<S>(
+        &self,
+        tx: VersionedMessage,
+        signers: impl Signers,
+    ) -> SdkResult<Signature> {
+        self.backend
+            .sign_and_send_with_signers(signers, tx)
             .await
             .map_err(|err| err.to_out_of_sol_error().unwrap_or(err))
     }
@@ -619,16 +634,20 @@ impl<T: AccountProvider> DriftClient<T> {
         account: &Pubkey,
         delegated: bool,
     ) -> SdkResult<TransactionBuilder> {
-        let account_data = self
-            .get_user(self.active_sub_account_id)
-            .expect("user")
-            .get_user_account();
-        Ok(TransactionBuilder::new(
-            self.program_data(),
-            *account,
-            Cow::Owned(account_data),
-            delegated,
-        ))
+        let user = self.get_user(self.active_sub_account_id);
+
+        match user {
+            Some(user) => {
+                let account_data = user.get_user_account();
+                Ok(TransactionBuilder::new(
+                    self.program_data(),
+                    *account,
+                    Cow::Owned(account_data),
+                    delegated,
+                ))
+            }
+            None => Err(SdkError::Generic("user".to_string())),
+        }
     }
 
     pub async fn get_recent_priority_fees(
@@ -835,7 +854,7 @@ impl<T: AccountProvider> DriftClient<T> {
             .deposit(amount, market_index, user_account_public_key, None)
             .add_ixs(ixs)
             .build();
-        let tx_sig = self.sign_and_send(tx).await?;
+        let tx_sig = self.sign_and_send_with_wallet(tx).await?;
 
         // await this.addUser(subAccountId);
         self.add_user(sub_account_id).await?;
@@ -1130,7 +1149,7 @@ impl<T: AccountProvider> DriftClientBackend<T> {
     /// Sign and send a tx to the network
     ///
     /// Returns the signature on success
-    pub async fn sign_and_send(
+    pub async fn sign_and_send_with_wallet(
         &self,
         wallet: &Wallet,
         tx: VersionedMessage,
@@ -1139,6 +1158,28 @@ impl<T: AccountProvider> DriftClientBackend<T> {
         let recent_block_hash = blockhash_reader.get_valid_blockhash();
         drop(blockhash_reader);
         let tx = wallet.sign_tx(tx, recent_block_hash)?;
+        self.rpc_client
+            .send_transaction(&tx)
+            .await
+            .map_err(|err| err.into())
+    }
+
+    /// Sign and send a tx to the network
+    ///
+    /// Returns the signature on success
+    pub async fn sign_and_send_with_signers(
+        &self,
+        signers: impl Signers,
+        mut tx: VersionedMessage,
+    ) -> SdkResult<Signature> {
+        let blockhash_reader = self.blockhash_subscriber.read().await;
+        let recent_block_hash = blockhash_reader.get_valid_blockhash();
+        drop(blockhash_reader);
+        let tx = {
+            tx.set_recent_blockhash(recent_block_hash);
+            VersionedTransaction::try_new(tx, &signers)
+                .map_err(|e| SdkError::Generic(e.to_string()))?
+        };
         self.rpc_client
             .send_transaction(&tx)
             .await

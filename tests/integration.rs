@@ -4,12 +4,11 @@ use drift_sdk::{
     constants::TOKEN_PROGRAM_ID,
     get_market_accounts,
     token_faucet::TokenFaucet,
-    types::{Context, MarketId, NewOrder},
+    types::{Context, MarketId, NewOrder, VersionedMessage},
     DriftClient, RpcAccountProvider, Wallet,
 };
 use solana_sdk::{
-    program_pack::Pack, rent::Rent, signature::Keypair, signer::Signer, system_instruction,
-    sysvar::Sysvar,
+    message::v0, program_pack::Pack, signature::Keypair, signer::Signer, system_instruction,
 };
 
 /// keypair for integration tests
@@ -54,16 +53,25 @@ async fn mock_usdc_mint(client: &DriftClient<RpcAccountProvider>) -> Keypair {
     //         .await
     //         .expect("get latest blockhash"),
     // );
-    let message = client
-        .init_tx(&client.wallet().default_sub_account(), false)
-        .await
-        .expect("init tx")
-        .add_ixs(ixs)
-        .build();
-    // fakeUSDCTx.add(createUSDCMintAccountIx);
-    // fakeUSDCTx.add(initCollateralMintIx);
+    // let message = client
+    //     .init_tx(&client.wallet().default_sub_account(), false)
+    //     .await
+    //     .expect("init tx")
+    //     .add_ixs(ixs)
+    //     .build();
+    let message = {
+        let lookup_tables = vec![client.program_data().lookup_table.clone()];
+        let message = v0::Message::try_compile(
+            &client.wallet().authority(),
+            ixs.as_slice(),
+            lookup_tables.as_slice(),
+            Default::default(),
+        )
+        .expect("ok");
+        VersionedMessage::V0(message)
+    };
     let _ = client
-        .sign_and_send(message)
+        .sign_and_send_with_signers(message, vec![client.wallet().into(), fake_usdc_mint])
         .await
         .expect("sign and send message");
 
@@ -142,7 +150,7 @@ async fn place_and_cancel_orders() {
 
     dbg!(tx.clone());
 
-    let result = client.sign_and_send(tx).await;
+    let result = client.sign_and_send_with_wallet(tx).await;
     dbg!(&result);
     assert!(result.is_ok());
 }
@@ -191,7 +199,7 @@ async fn place_and_take() {
         .place_and_take(order, None, None, None)
         .build();
 
-    let result = client.sign_and_send(tx).await;
+    let result = client.sign_and_send_with_wallet(tx).await;
     dbg!(&result);
     // TODO: add a place and make to match against
     assert!(result.is_err());
