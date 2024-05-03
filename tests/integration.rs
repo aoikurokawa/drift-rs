@@ -1,8 +1,6 @@
 use drift::math::constants::{BASE_PRECISION_I64, LAMPORTS_PER_SOL_I64, PRICE_PRECISION_U64};
 use drift_sdk::{
-    get_market_accounts,
-    types::{Context, MarketId, NewOrder},
-    DriftClient, RpcAccountProvider, Wallet,
+    get_market_accounts, token_faucet::TokenFaucet, types::{Context, MarketId, NewOrder}, DriftClient, RpcAccountProvider, Wallet
 };
 use solana_sdk::signature::Keypair;
 
@@ -98,6 +96,8 @@ async fn place_and_cancel_orders() {
 #[tokio::test]
 async fn place_and_take() {
     let wallet: Wallet = test_keypair().into();
+    let market_index = 0;
+    let token_faucet = TokenFaucet::new(wallet, mint);
     let mut client = DriftClient::new(
         Context::DevNet,
         RpcAccountProvider::new("https://api.devnet.solana.com"),
@@ -105,10 +105,21 @@ async fn place_and_take() {
     )
     .await
     .expect("connects");
-    client
-        .add_user(client.active_sub_account_id)
-        .await
-        .expect("add user");
+
+    match client.get_user_account(wallet.authority()).await {
+        Ok(user) => {
+            client
+                .add_user(user.sub_account_id)
+                .await
+                .expect("add user");
+        }
+        Err(_) => {
+            let _ = client
+                .initialize_user_account_for_devnet(market_index, token_faucet, amount)
+                .await
+                .expect("initialize user account for devnet");
+        }
+    }
 
     let sol_perp = client.market_lookup("sol-perp").expect("exists");
 

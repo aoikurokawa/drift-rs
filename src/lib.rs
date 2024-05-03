@@ -750,7 +750,7 @@ impl<T: AccountProvider> DriftClient<T> {
         };
 
         let name_buffer = encode_name(name)?;
-        // let initialize_user_account_ix = 
+        // let initialize_user_account_ix =
         //     TransactionBuilder::new(
         //     self.program_data(),
         //     *account,
@@ -776,77 +776,71 @@ impl<T: AccountProvider> DriftClient<T> {
             }),
         };
 
-
         Ok((user_account_publickey, initialize_user_account_ix))
     }
-    
+
     /// https://github.com/drift-labs/protocol-v2/blob/6450ed0daf0540564ebe2c477ea9a6d28049fd63/sdk/src/driftClient.ts#L2138
-    pub async fn initialize_user_account_for_devnet(&self, market_index: u16, token_faucet: TokenFaucet, amount: u64) -> SdkResult<Self> {
+    pub async fn initialize_user_account_for_devnet(
+        &mut self,
+        market_index: u16,
+        token_faucet: TokenFaucet,
+        amount: u64,
+    ) -> SdkResult<(Signature, Pubkey)> {
         let sub_account_id = 0;
         let name = DEFAULT_USER_NAME;
 
-     let tx = self
-         .init_tx(&self.wallet.sub_account(3), false)
-            .await;
         let mut ixs = Vec::new();
 
-		let (associate_token_public_key, create_associated_account_ix, mint_to_ix) =
-			token_faucet.create_associated_token_account_and_mint_to_instructions(self.wallet.authority, amount).await?;
+        let (associate_token_public_key, create_associated_account_ix, mint_to_ix) = token_faucet
+            .create_associated_token_account_and_mint_to_instructions(self.wallet.authority, amount)
+            .await?;
 
-		let (user_account_public_key, initialize_user_account_ix) =
-			self.get_initialize_user_instructions(
-				Some(name),
-				None
-			).await?;
+        let (user_account_public_key, initialize_user_account_ix) = self
+            .get_initialize_user_instructions(Some(name), None)
+            .await?;
 
-        let account_data = self
-            .get_user(self.active_sub_account_id)
-            .expect("user")
-            .get_user_account();
-let deposit_ix = TransactionBuilder::new(
-            self.program_data(),
-            *account,
-            Cow::Owned(account_data),
-            false,
-        ).deposit(amount, market_index, user_account_public_key, None);
-		// let deposit_collateral_ix = .getDepositInstruction(
-		// 	amount,
-		// 	marketIndex,
-		// 	associateTokenPublicKey,
-		// 	subAccountId,
-		// 	false,
-		// 	false
-		// );
+        // let deposit_ix = TransactionBuilder::new(
+        //             self.program_data(),
+        //             *account,
+        //             Cow::Owned(account_data),
+        //             false,
+        //         ).deposit(amount, market_index, user_account_public_key, None);
+        // let deposit_collateral_ix = .getDepositInstruction(
+        // 	amount,
+        // 	marketIndex,
+        // 	associateTokenPublicKey,
+        // 	subAccountId,
+        // 	false,
+        // 	false
+        // );
 
-		ixs.push(createAssociatedAccountIx, mintToIx);
+        // ixs.push(createAssociatedAccountIx, mintToIx);
 
-		if sub_account_id ==0 {
-			if (
-				!(await this.checkIfAccountExists(this.getUserStatsAccountPublicKey()))
-			) {export function getUserStatsAccountPublicKey(
-	programId: PublicKey,
-	authority: PublicKey
-): PublicKey {
-	return PublicKey.findProgramAddressSync(
-		[
-			Buffer.from(anchor.utils.bytes.utf8.encode('user_stats')),
-			authority.toBuffer(),
-		],
-		programId
-	)[0];
-}
-				ixs.push(await this.getInitializeUserStatsIx());
-			}
-		}
-		ixs.push(initializeUserAccountIx, depositCollateralIx);
+        ixs.push(create_associated_account_ix);
+        ixs.push(mint_to_ix);
+        if sub_account_id == 0 {
+            if self.get_user_stats(&self.wallet.authority).await.is_err() {
+                ixs.push(self.get_initialize_user_instructions(None, None).await?.1);
+            }
+        }
+        ixs.push(initialize_user_account_ix);
+        // ixs.push(initializeUserAccountIx, depositCollateralIx);
 
-		const tx = await this.buildTransaction(ixs, txParams);
+        // let tx = await this.buildTransaction(ixs, txParams);
 
-		const { txSig } = await this.sendTransaction(tx, [], this.opts);
+        // let  tx_sig  = await this.sendTransaction(tx, [], this.opts);
+        let tx = self
+            .init_tx(&self.wallet.default_sub_account(), false)
+            .await?
+            .deposit(amount, market_index, user_account_public_key, None)
+            .add_ixs(ixs)
+            .build();
+        let tx_sig = self.sign_and_send(tx).await?;
 
-		await this.addUser(subAccountId);
+        // await this.addUser(subAccountId);
+        self.add_user(sub_account_id).await?;
 
-		return [txSig, userAccountPublicKey];
+        Ok((tx_sig, user_account_public_key))
     }
 }
 
@@ -1274,6 +1268,13 @@ impl<'a> TransactionBuilder<'a> {
             legacy: false,
         }
     }
+
+    pub fn add_ixs(mut self, ixs: Vec<Instruction>) -> Self {
+        self.ixs.extend(ixs);
+
+        self
+    }
+
     /// Use legacy tx mode
     pub fn legacy(mut self) -> Self {
         self.legacy = true;

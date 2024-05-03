@@ -31,7 +31,7 @@ pub struct TokenFaucet {
 impl TokenFaucet {
     pub fn new(wallet: Wallet, mint: Pubkey) -> Self {
         let provider = RpcAccountProvider::new("");
-        let signer = wallet.signer;
+        let signer = wallet.clone().signer;
         let client = Client::new(Cluster::Devnet, signer);
         let program = client.program(TOKEN_FAUCET_PROGRAM_ID);
 
@@ -91,8 +91,9 @@ impl TokenFaucet {
         user_token_account: &Pubkey,
         amount: u64,
     ) -> SdkResult<Vec<Instruction>> {
-        let signer = self.wallet.signer;
-        let signer = Keypair::from_bytes(&signer.to_bytes()).unwrap();
+        let signer = &self.wallet.signer;
+        let signer = Keypair::from_bytes(&signer.to_bytes())
+            .map_err(|e| SdkError::Generic(e.to_string()))?;
         self.program
             .request()
             .accounts(accounts::MintToUser {
@@ -113,8 +114,9 @@ impl TokenFaucet {
         user_token_account: &Pubkey,
         amount: u64,
     ) -> SdkResult<Signature> {
-        let signer = self.wallet.signer.clone();
-        let signer = Keypair::from_bytes(&signer.to_bytes()).unwrap();
+        let signer = &self.wallet.signer;
+        let signer = Keypair::from_bytes(&signer.to_bytes())
+            .map_err(|e| SdkError::Generic(e.to_string()))?;
         let mint_ix = self.mint_to_user_ix(user_token_account, amount)?;
         match mint_ix.get(0) {
             Some(ix) => self
@@ -124,7 +126,9 @@ impl TokenFaucet {
                 .signer(&signer)
                 .send()
                 .map_err(|e| SdkError::AnchorClient(e)),
-            None => Err(SdkError::Generic("".to_string())),
+            None => Err(SdkError::Generic(
+                "fail to get mint instruction".to_string(),
+            )),
         }
     }
 
