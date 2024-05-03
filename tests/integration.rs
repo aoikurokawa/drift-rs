@@ -1,8 +1,16 @@
+use anchor_spl::token::spl_token::{instruction, state::Mint};
 use drift::math::constants::{BASE_PRECISION_I64, LAMPORTS_PER_SOL_I64, PRICE_PRECISION_U64};
 use drift_sdk::{
-    get_market_accounts, token_faucet::TokenFaucet, types::{Context, MarketId, NewOrder}, DriftClient, RpcAccountProvider, Wallet
+    constants::TOKEN_PROGRAM_ID,
+    get_market_accounts,
+    token_faucet::TokenFaucet,
+    types::{Context, MarketId, NewOrder},
+    DriftClient, RpcAccountProvider, Wallet,
 };
-use solana_sdk::signature::Keypair;
+use solana_sdk::{
+    program_pack::Pack, rent::Rent, signature::Keypair, signer::Signer, system_instruction,
+    sysvar::Sysvar,
+};
 
 /// keypair for integration tests
 fn test_keypair() -> Keypair {
@@ -14,6 +22,52 @@ fn test_keypair() -> Keypair {
     // Keypair::from_base58_string(private_key.as_str())
     // }
     Keypair::new()
+}
+
+async fn mock_usdc_mint(client: &DriftClient<RpcAccountProvider>) -> Keypair {
+    let fake_usdc_mint = Keypair::new();
+    // let rent = Rent::get().expect("get rent");
+    let mint_len = Mint::LEN;
+    let create_usdc_mint_account_ix = system_instruction::create_account(
+        &client.wallet().authority(),
+        &fake_usdc_mint.pubkey(),
+        u64::MAX,
+        mint_len as u64,
+        &TOKEN_PROGRAM_ID,
+    );
+    let init_collateral_mint_ix = instruction::initialize_mint(
+        &anchor_spl::token::ID,
+        &fake_usdc_mint.pubkey(),
+        client.wallet().authority(),
+        None,
+        6,
+    )
+    .expect("initialize usdc mint");
+
+    let ixs = vec![create_usdc_mint_account_ix, init_collateral_mint_ix];
+    // let fake_usdt_tx = Transaction::new_signed_with_payer(
+    //     &[create_usdc_mint_account_ix, init_collateral_mint_ix],
+    //     Some(wallet.authority()),
+    //     &[&client.wallet().into()],
+    //     client
+    //         .get_latest_blockhash()
+    //         .await
+    //         .expect("get latest blockhash"),
+    // );
+    let message = client
+        .init_tx(&client.wallet().default_sub_account(), false)
+        .await
+        .expect("init tx")
+        .add_ixs(ixs)
+        .build();
+    // fakeUSDCTx.add(createUSDCMintAccountIx);
+    // fakeUSDCTx.add(initCollateralMintIx);
+    let _ = client
+        .sign_and_send(message)
+        .await
+        .expect("sign and send message");
+
+    fake_usdc_mint
 }
 
 #[tokio::test]
@@ -97,7 +151,6 @@ async fn place_and_cancel_orders() {
 async fn place_and_take() {
     let wallet: Wallet = test_keypair().into();
     let market_index = 0;
-    let token_faucet = TokenFaucet::new(wallet, mint);
     let mut client = DriftClient::new(
         Context::DevNet,
         RpcAccountProvider::new("https://api.devnet.solana.com"),
@@ -105,17 +158,21 @@ async fn place_and_take() {
     )
     .await
     .expect("connects");
+    let mock_usdc = mock_usdc_mint(&client).await;
+    let token_faucet = TokenFaucet::new(wallet.clone(), mock_usdc.pubkey());
 
     match client.get_user_account(wallet.authority()).await {
         Ok(user) => {
+            eprintln!("add user account");
             client
                 .add_user(user.sub_account_id)
                 .await
                 .expect("add user");
         }
         Err(_) => {
+            eprintln!("creating new user account");
             let _ = client
-                .initialize_user_account_for_devnet(market_index, token_faucet, amount)
+                .initialize_user_account_for_devnet(market_index, token_faucet, 10)
                 .await
                 .expect("initialize user account for devnet");
         }
